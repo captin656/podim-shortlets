@@ -1,0 +1,181 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --nav-h: 52px;
+  --ease-apple: cubic-bezier(0.32, 0.72, 0, 1);
+  color-scheme: light;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scroll-behavior: smooth;
+    scroll-padding-top: calc(var(--nav-h) + 16px);
+  }
+
+  body {
+    @apply bg-white font-sans text-ink antialiased;
+    font-size: 1.0625rem; /* 17px, the size Apple sets body copy at */
+    line-height: 1.47;
+    letter-spacing: -0.012em;
+    font-feature-settings: "cv11", "ss03", "calt", "kern";
+    overflow-x: hidden;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background: rgba(249, 115, 22, 0.25);
+  }
+
+  :focus-visible {
+    outline: 2px solid #f97316;
+    outline-offset: 3px;
+    border-radius: 0.5rem;
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px; /* anything smaller makes iOS Safari zoom the page on focus */
+  }
+
+  img {
+    -webkit-user-drag: none;
+  }
+}
+
+@layer components {
+  .container-x {
+    @apply mx-auto w-full max-w-[1280px] px-5 sm:px-8 lg:px-10;
+  }
+
+  .section {
+    @apply py-20 sm:py-28 lg:py-36;
+  }
+
+  /* Buttons: pill shaped, 44px minimum touch target. */
+  .btn {
+    @apply inline-flex min-h-[44px] select-none items-center justify-center gap-2 whitespace-nowrap rounded-full px-6 text-[15px] font-medium transition duration-200 ease-apple active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40;
+  }
+  .btn-ink {
+    @apply bg-ink text-white hover:bg-ink-soft;
+  }
+  .btn-accent {
+    @apply bg-accent text-white hover:bg-accent-deep;
+  }
+  .btn-quiet {
+    @apply bg-mist text-ink hover:bg-mist-deep;
+  }
+  .btn-outline {
+    @apply bg-white text-ink ring-1 ring-inset ring-hairline hover:bg-mist;
+  }
+  .btn-lg {
+    @apply min-h-[52px] px-8 text-[17px];
+  }
+  .btn-sm {
+    @apply min-h-[36px] px-4 text-[13px];
+  }
+
+  .link {
+    @apply text-accent-deep underline-offset-4 hover:underline;
+  }
+
+  .glass {
+    background: rgba(255, 255, 255, 0.72);
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+    backdrop-filter: saturate(180%) blur(22px);
+  }
+
+  .field {
+    @apply min-h-[48px] w-full rounded-2xl border-0 bg-mist px-4 text-ink placeholder:text-ink-faint ring-1 ring-inset ring-transparent transition duration-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-ink;
+  }
+  .field-label {
+    @apply mb-1.5 block text-[13px] font-medium text-ink-mute;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-mist px-3 py-1 text-[13px] font-medium text-ink-soft;
+  }
+
+  .hide-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden bg-mist;
+  }
+  .skeleton::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full animate-[shimmer_1.4s_infinite];
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
+  }
+
+  /* Price slider: a two-thumb range built from two overlapping inputs. */
+  .range-thumb {
+    @apply pointer-events-none absolute inset-0 h-6 w-full appearance-none bg-transparent;
+  }
+  .range-thumb::-webkit-slider-thumb {
+    @apply pointer-events-auto h-6 w-6 cursor-grab appearance-none rounded-full border-0 bg-white shadow-lift ring-1 ring-hairline active:cursor-grabbing;
+  }
+  .range-thumb::-moz-range-thumb {
+    @apply pointer-events-auto h-6 w-6 cursor-grab rounded-full border-0 bg-white shadow-lift;
+  }
+}
+
+/* The hero image grows into place as you scroll; --p goes from 0 to 1. */
+.hero-frame {
+  --p: 0;
+  transform: scale(calc(0.92 + var(--p) * 0.08));
+  border-radius: calc(2.5rem - var(--p) * 1.5rem);
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .hero-frame {
+    transform: none;
+    border-radius: 2rem;
+  }
+}
+
+/* Native date inputs and number spinners look wrong on a calm page, so tame them. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

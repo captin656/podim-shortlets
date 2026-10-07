@@ -1,0 +1,455 @@
+// Podium Apartments — database schema (PostgreSQL)
+// All money is stored as whole Naira (Int). Paystack amounts are converted to kobo at the API edge.
+// Date-only columns use @db.Date and are treated as calendar days (no timezone drift).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  GUEST
+  ADMIN
+  MANAGER
+  CLEANER
+  ACCOUNTANT
+}
+
+enum PropertyType {
+  STUDIO
+  ONE_BED
+  TWO_BED
+  THREE_BED
+  PENTHOUSE
+}
+
+enum CancellationPolicy {
+  FLEXIBLE // free until 48h before check-in
+  MODERATE // 50% refund until 5 days before check-in
+  STRICT // no refund
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  CHECKED_OUT
+  COMPLETED
+  CANCELLED
+  REJECTED
+}
+
+enum PaymentOption {
+  FULL
+  DEPOSIT // 50% of stay + full caution now, balance on arrival
+}
+
+enum PaymentMethod {
+  PAYSTACK
+  BANK_TRANSFER
+}
+
+enum BookingPaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+enum PaymentKind {
+  CHARGE
+  REFUND
+  CAUTION_REFUND
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum CautionStatus {
+  NONE
+  HELD
+  REFUNDED
+  RETAINED
+}
+
+enum IdType {
+  NIN
+  PASSPORT
+  DRIVERS_LICENSE
+  VOTERS_CARD
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  HIDDEN
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+}
+
+enum BlockSource {
+  MANUAL
+  ICAL
+}
+
+enum StaffRole {
+  MANAGER
+  CLEANER
+  ACCOUNTANT
+}
+
+enum MessageChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+// ───────────────────────────── Models ─────────────────────────────
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String?   @unique
+  phone          String?   @unique
+  passwordHash   String?
+  image          String?
+  role           Role      @default(GUEST)
+  emailVerified  DateTime?
+  phoneVerified  DateTime?
+  idVerified     Boolean   @default(false)
+  isBlacklisted  Boolean   @default(false)
+  blacklistReason String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  bookings Booking[]
+  reviews  Review[]
+  staff    Staff?
+  wishlist Apartment[] @relation("Wishlist")
+}
+
+model Apartment {
+  id            String       @id @default(cuid())
+  slug          String       @unique
+  title         String
+  tagline       String?
+  description   String       @db.Text
+  propertyType  PropertyType @default(ONE_BED)
+
+  address  String
+  area     String @default("Transekulu")
+  city     String @default("Enugu")
+  state    String @default("Enugu")
+  lat      Float
+  lng      Float
+
+  // Pricing (NGN)
+  pricePerNight   Int
+  weekendPrice    Int? // applies to Friday and Saturday nights
+  weeklyDiscount  Int  @default(0) // percent, applied from 7 nights
+  monthlyDiscount Int  @default(0) // percent, applied from 28 nights
+  cleaningFee     Int  @default(0)
+  cautionFee      Int  @default(0) // refundable
+
+  minNights  Int @default(1)
+  maxNights  Int @default(30)
+  maxGuests  Int @default(2)
+  bedrooms   Int @default(1)
+  beds       Int @default(1)
+  bathrooms  Int @default(1)
+
+  checkInTime  String   @default("14:00")
+  checkOutTime String   @default("11:00")
+  houseRules   String[]
+
+  cancellationPolicy CancellationPolicy @default(FLEXIBLE)
+  isInstantBook      Boolean            @default(true)
+  isFeatured         Boolean            @default(false)
+  isActive           Boolean            @default(true)
+  videoUrl           String?
+
+  // Shown only after payment
+  gateCode        String?
+  wifiName        String?
+  wifiPassword    String?
+  arrivalNotes    String? @db.Text
+
+  hostName  String @default("Podium Concierge")
+  hostPhone String?
+
+  // Denormalised review stats, refreshed whenever a review is approved or hidden
+  ratingAvg   Float @default(0)
+  ratingCount Int   @default(0)
+
+  icalToken String @default(cuid()) // secret in the export URL
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  images         ApartmentImage[]
+  amenities      Amenity[]
+  bookings       Booking[]
+  reviews        Review[]
+  blockedDates   BlockedDate[]
+  seasonalPrices SeasonalPrice[]
+  icalFeeds      IcalFeed[]
+  coupons        Coupon[]
+  wishlistedBy   User[]           @relation("Wishlist")
+
+  @@index([isActive, isFeatured])
+  @@index([pricePerNight])
+}
+
+model ApartmentImage {
+  id          String    @id @default(cuid())
+  apartmentId String
+  url         String
+  alt         String?
+  position    Int       @default(0)
+  apartment   Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+
+  @@index([apartmentId, position])
+}
+
+model Amenity {
+  id         String      @id @default(cuid())
+  name       String      @unique
+  slug       String      @unique
+  icon       String // key into components/icons amenity map
+  apartments Apartment[]
+}
+
+model SeasonalPrice {
+  id            String    @id @default(cuid())
+  apartmentId   String
+  name          String // e.g. "Christmas & New Year"
+  startDate     DateTime  @db.Date // inclusive
+  endDate       DateTime  @db.Date // inclusive
+  pricePerNight Int
+  weekendPrice  Int?
+  apartment     Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+
+  @@index([apartmentId, startDate, endDate])
+}
+
+model Booking {
+  id          String @id @default(cuid())
+  code        String @unique // human reference e.g. PDM-7K2Q9X
+  accessToken String @unique @default(cuid()) // lets guest checkouts open their booking without an account
+
+  apartmentId String
+  userId      String?
+  cleanerId   String?
+
+  status BookingStatus @default(PENDING)
+
+  checkIn  DateTime @db.Date
+  checkOut DateTime @db.Date // exclusive: the guest leaves on this date
+  nights   Int
+  guests   Int
+
+  guestName     String
+  guestEmail    String
+  guestPhone    String
+  guestWhatsapp String?
+  idType        IdType
+  idNumber      String
+  specialRequests String? @db.Text
+
+  // Price snapshot (never recomputed after creation)
+  nightlyBreakdown Json
+  accommodation    Int // sum of nightly rates
+  discountLabel    String?
+  discountAmount   Int      @default(0)
+  couponCode       String?
+  couponDiscount   Int      @default(0)
+  cleaningFee      Int      @default(0)
+  serviceFee       Int      @default(0)
+  taxAmount        Int      @default(0)
+  cautionFee       Int      @default(0)
+  total            Int
+  amountPaid       Int      @default(0)
+
+  paymentOption  PaymentOption        @default(FULL)
+  paymentMethod  PaymentMethod        @default(PAYSTACK)
+  paymentStatus  BookingPaymentStatus @default(UNPAID)
+  cautionStatus  CautionStatus        @default(NONE)
+  cautionRefundedAt DateTime?
+
+  cancellationPolicy CancellationPolicy
+  cancelledAt        DateTime?
+  cancelReason       String?
+  refundAmount       Int?
+
+  holdExpiresAt DateTime? // PENDING bookings keep the dates until this moment
+  checkedInAt   DateTime?
+  checkedOutAt  DateTime?
+  adminNotes    String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  apartment Apartment @relation(fields: [apartmentId], references: [id])
+  user      User?     @relation(fields: [userId], references: [id])
+  cleaner   Staff?    @relation(fields: [cleanerId], references: [id])
+  payments  Payment[]
+  review    Review?
+  messages  GuestMessage[]
+
+  @@index([apartmentId, checkIn, checkOut])
+  @@index([status, checkIn])
+  @@index([userId])
+  @@index([guestEmail])
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  bookingId String
+  reference String        @unique
+  provider  String // PAYSTACK | BANK_TRANSFER
+  kind      PaymentKind   @default(CHARGE)
+  amount    Int
+  currency  String        @default("NGN")
+  status    PaymentStatus @default(PENDING)
+  channel   String? // card, bank, bank_transfer, ussd …
+  proofUrl  String? // uploaded transfer receipt
+  paidAt    DateTime?
+  raw       Json?
+  createdAt DateTime      @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([status, paidAt])
+}
+
+model Review {
+  id          String       @id @default(cuid())
+  bookingId   String       @unique // one review per stay, which proves the stay happened
+  apartmentId String
+  userId      String
+  rating      Int
+  comment     String       @db.Text
+  status      ReviewStatus @default(PENDING)
+  reply       String?      @db.Text
+  repliedAt   DateTime?
+  createdAt   DateTime     @default(now())
+
+  booking   Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  apartment Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([apartmentId, status])
+}
+
+model Coupon {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  description String?
+  type        DiscountType
+  value       Int // percent (1-100) or fixed NGN amount
+  minNights   Int          @default(1)
+  maxUses     Int?
+  usedCount   Int          @default(0)
+  startsAt    DateTime?
+  expiresAt   DateTime?
+  isActive    Boolean      @default(true)
+  apartmentId String? // null = valid on every apartment
+  createdAt   DateTime     @default(now())
+
+  apartment Apartment? @relation(fields: [apartmentId], references: [id], onDelete: SetNull)
+}
+
+model Staff {
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  role      StaffRole
+  phone     String?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+}
+
+model BlockedDate {
+  id          String      @id @default(cuid())
+  apartmentId String
+  startDate   DateTime    @db.Date // inclusive
+  endDate     DateTime    @db.Date // exclusive
+  reason      String?
+  source      BlockSource @default(MANUAL)
+  feedId      String?
+  createdAt   DateTime    @default(now())
+
+  apartment Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  feed      IcalFeed? @relation(fields: [feedId], references: [id], onDelete: Cascade)
+
+  @@index([apartmentId, startDate, endDate])
+}
+
+model IcalFeed {
+  id           String    @id @default(cuid())
+  apartmentId  String
+  name         String // "Airbnb", "Booking.com"
+  url          String
+  lastSyncedAt DateTime?
+  lastError    String?
+  createdAt    DateTime  @default(now())
+
+  apartment    Apartment     @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  blockedDates BlockedDate[]
+}
+
+model GuestMessage {
+  id        String         @id @default(cuid())
+  bookingId String
+  channel   MessageChannel
+  body      String         @db.Text
+  sentAt    DateTime       @default(now())
+  booking   Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+}
+
+model Otp {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([phone, createdAt])
+}
+
+// Single-row business settings (id is always "main")
+model Setting {
+  id                   String @id @default("main")
+  businessName         String @default("Podium Apartments")
+  tagline              String @default("Serviced apartments in Transekulu, Enugu")
+  phone                String @default("+234 800 000 0000")
+  whatsapp             String @default("2348000000000")
+  email                String @default("stay@podiumapartments.ng")
+  address              String @default("Transekulu, Enugu, Nigeria")
+  serviceFeePercent    Float  @default(5)
+  taxPercent           Float  @default(0)
+  bankName             String @default("")
+  bankAccountName      String @default("")
+  bankAccountNumber    String @default("")
+  flexibleFreeHours    Int    @default(48)
+  moderateDays         Int    @default(5)
+  moderateRefundPercent Int   @default(50)
+  holdMinutes          Int    @default(30)
+  updatedAt            DateTime @updatedAt
+}
